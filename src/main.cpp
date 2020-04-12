@@ -1,6 +1,9 @@
 #include "track.hpp"
 #include <chrono>
 
+#include <Eigen/Core>
+#include <Eigen/Geometry>
+
 namespace hw
 {
 
@@ -43,7 +46,7 @@ void trackFrame(const std::string& data_path, double& error)
 
 
     //* DSO pattern
-    {
+    {//8
         pattern.push_back(std::make_pair(-2, 0));
         pattern.push_back(std::make_pair(-1,-1));
         pattern.push_back(std::make_pair(-1, 1));
@@ -113,12 +116,15 @@ void trackFrame(const std::string& data_path, double& error)
             frame_ref = hw::Frame::create(img_gray, img_depth, MaxLevel);
             Sophus::SE3d T_w_gt(sequence.q_[i], sequence.t_[i]);
             frame_ref->setPose(T_w_gt.inverse()); // first as groundtruth
-
             frame_ref->features = good_fast_point; // set feature
             ofs <<"#  tx  ty  tz  qx  qy  qz  qw"<<std::endl;
             ofs << std::fixed;
             ofs << std::setprecision(4) << frame_ref->getPose().inverse().translation().transpose() << " "
                 << frame_ref->getPose().inverse().unit_quaternion().vec().transpose()<<" "<<frame_ref->getPose().inverse().unit_quaternion().w()<<std::endl;
+                
+            std::cout << "init:"<<std::setprecision(4) << frame_ref->getPose().inverse().translation().transpose() << " | "
+                << frame_ref->getPose().inverse().unit_quaternion().vec().transpose()<<" "<<frame_ref->getPose().inverse().unit_quaternion().w()<<std::endl;
+
             continue;
         }
 
@@ -127,6 +133,8 @@ void trackFrame(const std::string& data_path, double& error)
         frame_cur->setPose(frame_ref->getPose());  // last frame T as initial T
 
         start = std::chrono::steady_clock::now();
+
+        //==>>>>>>>>>>>>>>Track
         size_t is_good = tracker.run(frame_ref, frame_cur); // image alignment
         end = std::chrono::steady_clock::now();
         double duration = std::chrono::duration_cast<std::chrono::milliseconds> (end - start).count();
@@ -157,7 +165,10 @@ void trackFrame(const std::string& data_path, double& error)
     error = 0;
     ofs.open("./data/error.txt");
     for(auto it = translation_error.begin(); it != translation_error.end(); ++it)
-    {    ofs << *it <<std::endl;  error += *it; }
+    {
+            ofs << *it <<std::endl;
+              error += *it;
+    }
     ofs.close();
 };
 
