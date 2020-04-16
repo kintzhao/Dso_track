@@ -154,7 +154,7 @@ void hw::Tracker::computeResidual(const Sophus::SE3d &state)
         size_t pattern_count = 0;
         float hw = 1;
         const float setting_huberTH = 9;
-        float *data_patch_ref = reinterpret_cast<float *>(patch_ref_.data) + i_ftr * num_pattern;
+        float *data_patch_ref = reinterpret_cast<float *>(patch_ref_.data) + i_ftr * num_pattern;//calced at preCompute
 
         for (auto iter_pattern : pattern_)
         {
@@ -182,18 +182,15 @@ void hw::Tracker::computeResidual(const Sophus::SE3d &state)
 
             // TODO calculate residual res = ref - cur may need to add huber
             // residual_pattern[pattern_count] = ***;
-            //const uint8_t *data_cur = data + y_i * stride + x_i;
-            //float rlR = getInterpolatedElement31(colorRef, point->u+dx, point->v+dy, wl);
-            float ref_value = utils::interpolate_uint8((img_ref_pyr.data),
-                                                       ftr_ref_x * scale + x_pattern, ftr_ref_y * scale + y_pattern, stride);
-            float res = pattern_value - ref_value;
+            float res = data_patch_ref[pattern_count] - pattern_value;
 
-            if (res > setting_huberTH)
+            if (fabs(res) > setting_huberTH)
                 hw = setting_huberTH / fabs(res);
             else
                 hw = 1;
             
-            residual_pattern[pattern_count] = hw * res * res * (2 - hw);
+            if(hw < 1) hw = sqrtf(hw);
+            residual_pattern[pattern_count] = hw * res;
 
             ++pattern_count;
         }
@@ -211,29 +208,28 @@ void hw::Tracker::computeResidual(const Sophus::SE3d &state)
 
         // TODO calculate Jacobian
         {
-            if(hw < 1)
-                hw = sqrtf(hw);
-
             Eigen::Matrix<double, 2, 6> jacob_xyz2uv;
             double Pz_inv = 1 / point_cur[2];
             double Pz_inv2 = Pz_inv * Pz_inv;
             //double new_idepth = (1 / ftr_depth_ref) * Pz_inv; // dpi/pz'
-            jacob_xyz2uv(0, 0) = Cam::fx() * Pz_inv;
+            float fx = -1*Cam::fx() *scale;
+            float fy = -1*Cam::fy() *scale;            
+            jacob_xyz2uv(0, 0) = fx * Pz_inv;
             jacob_xyz2uv(0, 1) = 0;
-            jacob_xyz2uv(0, 2) = Cam::fx() * (-point_cur[0] * Pz_inv2);
-            jacob_xyz2uv(0, 3) = Cam::fx() * (-point_cur[0] * point_cur[1] * Pz_inv2);
-            jacob_xyz2uv(0, 4) = Cam::fx() * (1 + point_cur[0] * point_cur[0] * Pz_inv2);
-            jacob_xyz2uv(0, 5) = Cam::fx() * (-point_cur[1] * Pz_inv);
+            jacob_xyz2uv(0, 2) = fx * (-point_cur[0] * Pz_inv2);
+            jacob_xyz2uv(0, 3) = fx * (-point_cur[0] * point_cur[1] * Pz_inv2);
+            jacob_xyz2uv(0, 4) = fx * (1 + point_cur[0] * point_cur[0] * Pz_inv2);
+            jacob_xyz2uv(0, 5) = fx * (-point_cur[1] * Pz_inv);
 
             jacob_xyz2uv(1, 0) = 0;
-            jacob_xyz2uv(1, 1) = Cam::fy() * Pz_inv;
-            jacob_xyz2uv(1, 2) = Cam::fy() * (- point_cur[1] * Pz_inv2);
-            jacob_xyz2uv(1, 3) = Cam::fy() * (-1 - point_cur[1] * point_cur[1] * Pz_inv2);
-            jacob_xyz2uv(1, 4) = Cam::fy() * point_cur[0] * point_cur[1] * Pz_inv2;
-            jacob_xyz2uv(1, 5) = Cam::fy() * point_cur[0] * Pz_inv;
+            jacob_xyz2uv(1, 1) = fy * Pz_inv;
+            jacob_xyz2uv(1, 2) = fy * (- point_cur[1] * Pz_inv2);
+            jacob_xyz2uv(1, 3) = fy * (-1 - point_cur[1] * point_cur[1] * Pz_inv2);
+            jacob_xyz2uv(1, 4) = fy * point_cur[0] * point_cur[1] * Pz_inv2;
+            jacob_xyz2uv(1, 5) = fy * point_cur[0] * Pz_inv;
 
             // jacobian_.block(num_pattern*i_ftr, 0, num_pattern, 6) = ;
-            jacobian_.block(num_pattern * i_ftr, 0, num_pattern, 6) = patch_dI_.block(i_ftr * pattern_.size(), 0, pattern_.size(), 2) * jacob_xyz2uv*hw;
+            jacobian_.block(num_pattern * i_ftr, 0, num_pattern, 6) = patch_dI_.block(i_ftr * num_pattern, 0, num_pattern, 2) * jacob_xyz2uv*hw;
         }
     }
 }
@@ -324,5 +320,5 @@ void hw::Tracker::update(const Sophus::SE3d &old_state, Sophus::SE3d &new_state)
 {
     // TODO update new state
     // new_state = ;
-    new_state = Sophus::SE3d::exp(delta_x_.head<6>().cast<double>()) * old_state;
+    new_state = Sophus::SE3d::exp(delta_x_) * old_state;
 }
